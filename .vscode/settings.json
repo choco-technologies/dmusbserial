@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "dmusbserial.h": "c",
+        "dmusbserial_port.h": "c"
+    },
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.errorSquiggles": "enabled"
+}
