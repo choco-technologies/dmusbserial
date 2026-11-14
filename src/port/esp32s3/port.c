@@ -14,7 +14,10 @@
  *   gives up.
  * - RX: the host's bytes are in the EP1 FIFO; the interrupt "a packet was received" moves them into the ring of the driver.
  *
- * The controller is already running (the ROM uses it, and the debugger over JTAG): it is not reset or reconfigured here.
+ * The controller is already running (the ROM uses it, and the debugger over JTAG): it is not reset or reconfigured here - except for its
+ * interrupts: this driver owns them. What ran before (the ROM, another firmware: a reset of the CPU does not reset the controller) may
+ * have left some enabled, and one of them, "the TX FIFO is empty" (level), is raised all the time: its interrupt would be taken again
+ * and again, since the handler serves only the receiver, and the CPU would do nothing else (the boot hangs).
  */
 
 #define USB_BASE                0x60038000UL
@@ -29,6 +32,7 @@
 #define EP1_CONF_IN_DATA_FREE   (1UL << 1)      /* the TX FIFO has room */
 #define EP1_CONF_OUT_DATA_AVAIL (1UL << 2)      /* the RX FIFO holds data */
 #define USB_INT_OUT_RECV_PKT    (1UL << 2)      /* a packet from the host has arrived */
+#define USB_INT_ALL             0xFFFUL         /* every interrupt of the controller (bits 0..11) */
 
 #define INTMTX_USB_SERIAL_JTAG_MAP_REG  (0x600C2000UL + 0x180UL)
 #define CPU_INTERRUPT           13U             /* level 1: GPIO 2, UART0 3, UART1 9, UART2 12, this 13 */
@@ -86,7 +90,8 @@ static bool wait_tx_free(uint32_t timeout_ms)
 dmod_dmusbserial_port_api_declaration(1.0, int, _init, ( void ))
 {
     if (s_started) return -EBUSY;
-    *reg(USB_INT_CLR) = USB_INT_OUT_RECV_PKT;
+    *reg(USB_INT_ENA) = 0U;                     /* none but what this driver enables (set_rx_ring()) */
+    *reg(USB_INT_CLR) = USB_INT_ALL;
     s_started = true;
     return 0;
 }
@@ -95,7 +100,7 @@ dmod_dmusbserial_port_api_declaration(1.0, int, _deinit, ( void ))
 {
     if (!s_started) return 0;
     Dmod_EnterCritical();
-    *reg(USB_INT_ENA) &= ~USB_INT_OUT_RECV_PKT;
+    *reg(USB_INT_ENA) = 0U;
     intenable_write(intenable_read() & ~(1UL << CPU_INTERRUPT));
     Dmod_ExitCritical();
     s_ring = NULL;
@@ -142,13 +147,13 @@ dmod_dmusbserial_port_api_declaration(1.0, int, _set_rx_ring, ( dm_sw_ring_t rin
     if (ring != NULL)
     {
         *reg(INTMTX_USB_SERIAL_JTAG_MAP_REG) = CPU_INTERRUPT;
-        *reg(USB_INT_ENA) |= USB_INT_OUT_RECV_PKT;
+        *reg(USB_INT_ENA) = USB_INT_OUT_RECV_PKT;
         intenable_write(intenable_read() | (1UL << CPU_INTERRUPT));
         rx_drain();     /* what came before the ring was there */
     }
     else
     {
-        *reg(USB_INT_ENA) &= ~USB_INT_OUT_RECV_PKT;
+        *reg(USB_INT_ENA) = 0U;
         intenable_write(intenable_read() & ~(1UL << CPU_INTERRUPT));
     }
     Dmod_ExitCritical();
